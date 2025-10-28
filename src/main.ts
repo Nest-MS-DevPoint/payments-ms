@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { vars } from './config';
 import { Logger, ValidationPipe } from '@nestjs/common';
+import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
 async function bootstrap() {
   const logger = new Logger('Payments-ms');
@@ -16,6 +17,21 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     })
   );
+
+  logger.log('Connecting to NATS...');
+  logger.debug('vars', vars);
+
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.NATS,
+    options: {
+      servers: vars.natsServers,
+      name: 'PAYMENTS_SERVICE'
+    },
+  }, {
+    inheritAppConfig: true,
+  });
+
+  await app.startAllMicroservices();
   
   await app.listen(vars.port ?? 3000);
 

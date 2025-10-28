@@ -1,18 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { vars } from 'src/config';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { NATS_SERVICE, vars } from 'src/config';
 import Stripe from 'stripe'
 import { PaymentSessionDto } from './dtos/payment-session.dto';
 import { Request, Response } from 'express';
+import { ClientProxy } from '@nestjs/microservices';
 
 @Injectable()
 export class PaymentsService {
 
     private logger = new Logger('PaymentsService')
-
-
     private readonly stripe = new Stripe(
         vars.stripeSecret
     )
+
+    constructor(
+        @Inject(NATS_SERVICE) private readonly client: ClientProxy
+    ) { }
 
     async createPaymentService(paymentSessionDtos: PaymentSessionDto) {
 
@@ -34,7 +37,7 @@ export class PaymentsService {
 
 
 
-        const session = this.stripe.checkout.sessions.create({
+        const session = await this.stripe.checkout.sessions.create({
             // ID de la orden
             payment_intent_data: {
                 metadata: {
@@ -48,35 +51,48 @@ export class PaymentsService {
 
         })
 
-        return session
+        return {
+            successUrl: session.success_url,
+            cancelUrl: session.cancel_url,
+            url: session.url
+        }
     }
 
     async stripeWebhook(req: Request, res: Response) {
         const sig = req.headers['stripe-signature'];
 
         let event: Stripe.Event;
-        
+
         const endpointSecret = vars.stripeEndpointSecret
 
         try {
             this.logger.log(sig)
+            this.logger.debug(endpointSecret)
             event = this.stripe.webhooks.constructEvent(req['rawBody'], sig!, endpointSecret);
-            
-            this.logger.log({event})
-            
+            // this.logger.log({event})
+
             switch (event.type) {
                 case 'charge.succeeded':
                     const chargeSucceeded = event.data.object;
                     this.logger.log({
                         metadata: chargeSucceeded.metadata
                     })
+                    const payload = {
+                        stripePaymentId: chargeSucceeded.id,
+                        orderId: chargeSucceeded.metadata.orderId,
+                        receiptURL: chargeSucceeded.receipt_url
+                    }
+                    this.logger.log("Payment service: ", { ...payload })
+
+                    this.client.emit('payment.succeeded', {...payload} )
                     break
                 default:
                     this.logger.log(`Event ${event.type} not handled`)
             }
         }
         catch (err) {
-            res.status(400).send(`Webhook Error: ${err.message}`);
+            this.logger.error(err)
+            return res.status(400).send(`Webhook Error: ${err.message}`);
         }
 
 
