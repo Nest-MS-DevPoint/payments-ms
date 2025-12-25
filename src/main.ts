@@ -10,7 +10,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
   });
-  
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -32,7 +32,9 @@ async function bootstrap() {
   });
 
   await app.startAllMicroservices();
-  
+
+  logger.log("Health checke added!!")
+
   await app.listen(vars.port ?? 3000);
 
   logger.log(`Payments Microservices running on port ${vars.port}`);
